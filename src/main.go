@@ -11,8 +11,12 @@ import (
 )
 
 type Config struct {
-	s3Url string
-	backendUrl string
+	s3Url         string
+	backendUrl    string
+	redisHost     string
+	redisPort     string
+	redisPassword string
+	redisDB       int
 }
 
 func getMD5Hash(text string) string {
@@ -21,44 +25,43 @@ func getMD5Hash(text string) string {
 	return hex.EncodeToString(hasher.Sum(nil))
 }
 
-
-
 func handle(w http.ResponseWriter, r *http.Request) {
-	myconfig := Config{
+	config := Config{
 		"https://www.sample-videos.com/img/Sample-png-image-500kb.png",
 		"http://alfa.kadromierz.pl",
+		"localhost",
+		"6379",
+		"",
+		0,
 	}
 
 	client := redis.NewClient(&redis.Options{
-		Addr:     "localhost:6379",
-		Password: "", // no password set
-		DB:       0,  // use default DB
+		Addr:     config.redisHost + ":" + config.redisPort,
+		Password: config.redisPassword,
+		DB:       config.redisDB,
 	})
 
 	fileHash := getMD5Hash(r.RequestURI)
 
-	glog.Info("Matching image" + r.RequestURI)
-
 	_, err := client.Get(fileHash).Result()
 
 	if err == redis.Nil {
-		_, err := http.Get(myconfig.backendUrl + r.RequestURI)
+		_, err := http.Get(config.backendUrl + r.RequestURI)
 
 		if err != nil {
 			glog.Error("Error on backend")
 			return
 		}
 
-		client.Set(fileHash,true, 0)
+		client.Set(fileHash, nil, 0)
 	}
 
-	resp, err := http.Get(myconfig.s3Url + r.RequestURI)
+	resp, err := http.Get(config.s3Url + r.RequestURI)
 
 	if err != nil {
 		glog.Error(err)
 		return
 	}
-
 
 	for k, v := range resp.Header {
 		w.Header().Set(k, strings.Join(v, ", "))
@@ -70,7 +73,6 @@ func handle(w http.ResponseWriter, r *http.Request) {
 		line, err := reader.ReadBytes('\n')
 
 		if err != nil {
-			glog.Error(err)
 			return
 		}
 
