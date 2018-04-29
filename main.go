@@ -33,7 +33,7 @@ func getMD5Hash(text string) string {
 
 func handle(w http.ResponseWriter, r *http.Request) {
 	fileHash := getMD5Hash(r.RequestURI)
-	resp := fetchImage(fileHash, r.RequestURI)
+	resp := fetchImage(fileHash, r.RequestURI, w)
 	reader := bufio.NewReader(resp.Body)
 
 	for k, v := range resp.Header {
@@ -54,33 +54,35 @@ func existInRedis(fileHash string) bool {
 	return err == nil
 }
 
-func fetchImage(fileHash string, uri string) *http.Response {
+func fetchImage(fileHash string, uri string, w http.ResponseWriter) *http.Response {
 	if !existInRedis(fileHash) {
-		return resolveFromBackend(uri, fileHash)
+		return resolveFromBackend(uri, fileHash, w)
 	} else {
-		return resolveFromS3(uri)
+		return resolveFromS3(uri, w)
 	}
 }
 
-func resolveFromS3(uri string) *http.Response {
+func resolveFromS3(uri string, w http.ResponseWriter) *http.Response {
 	resp, err := http.Get(config.s3Url + uri)
 	if err != nil {
 		glog.Error(err)
+		http.Error(w, "File not found", 404)
 	}
 	return resp
 }
 
-func resolveFromBackend(uri string, fileHash string) *http.Response {
+func resolveFromBackend(uri string, fileHash string, w http.ResponseWriter) *http.Response {
 	resp, err := http.Get(config.backendUrl + uri)
 	if err != nil {
 		glog.Error(err)
+		http.Error(w, "File not found", 404)
 	}
 	client.Set(fileHash, nil, 0)
 	return resp
 }
 
 func main() {
-	&client = redis.NewClient(&redis.Options{
+	client = *redis.NewClient(&redis.Options{
 		Addr:     config.redisHost + ":" + config.redisPort,
 		Password: config.redisPassword,
 		DB:       config.redisDB,
