@@ -28,61 +28,55 @@ var client redis.Client
 func getMD5Hash(text string) string {
 	hasher := md5.New()
 	hasher.Write([]byte(text))
-
 	return hex.EncodeToString(hasher.Sum(nil))
 }
 
 func handle(w http.ResponseWriter, r *http.Request) {
 	fileHash := getMD5Hash(r.RequestURI)
 	resp := fetchImage(fileHash, r.RequestURI)
+	reader := bufio.NewReader(resp.Body)
 
 	for k, v := range resp.Header {
 		w.Header().Set(k, strings.Join(v, ", "))
 	}
 
-	reader := bufio.NewReader(resp.Body)
-
 	for {
 		line, err := reader.ReadBytes('\n')
-
 		if err != nil {
 			return
 		}
-
 		w.Write(line)
 	}
 }
 
 func existInRedis(fileHash string) bool {
 	_, err := client.Get(fileHash).Result()
-
-	if err == nil {
-		return true
-	}
-
-	return false
+	return err == nil
 }
 
 func fetchImage(fileHash string, uri string) *http.Response {
-	if existInRedis(fileHash) {
-		resp, err := http.Get(config.backendUrl + uri)
-
-		if err != nil {
-			glog.Error(err)
-		}
-
-		client.Set(fileHash, nil, 0)
-
-		return resp
+	if !existInRedis(fileHash) {
+		return resolveFromBackend(uri, fileHash)
 	} else {
-		resp, err := http.Get(config.s3Url + uri)
-
-		if err != nil {
-			glog.Error(err)
-		}
-
-		return resp
+		return resolveFromS3(uri)
 	}
+}
+
+func resolveFromS3(uri string) *http.Response {
+	resp, err := http.Get(config.s3Url + uri)
+	if err != nil {
+		glog.Error(err)
+	}
+	return resp
+}
+
+func resolveFromBackend(uri string, fileHash string) *http.Response {
+	resp, err := http.Get(config.backendUrl + uri)
+	if err != nil {
+		glog.Error(err)
+	}
+	client.Set(fileHash, nil, 0)
+	return resp
 }
 
 func main() {
